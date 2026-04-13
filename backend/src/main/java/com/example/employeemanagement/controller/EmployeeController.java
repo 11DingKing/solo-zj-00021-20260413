@@ -11,10 +11,16 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import javax.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +30,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** This class represents the REST API controller for employees. */
@@ -40,16 +47,35 @@ public class EmployeeController {
   @Autowired private DepartmentService departmentService;
 
   /**
-   * Get all employees API.
+   * Get all employees API with pagination and search.
    *
-   * @return List of all employees
+   * @param page Page number (0-based)
+   * @param size Number of items per page
+   * @param keyword Search keyword for firstName, lastName, email
+   * @return Paginated list of employees
    */
-  @Operation(summary = "Get all employees", description = "Retrieve a list of all employees")
+  @Operation(summary = "Get all employees with pagination", description = "Retrieve a paginated list of employees with optional search")
   @GetMapping
-  public List<EmployeeResponseDto> getAllEmployees() {
-    return employeeService.getAllEmployees().stream()
+  public Map<String, Object> getAllEmployees(
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "10") int size,
+      @RequestParam(required = false) String keyword) {
+
+    Pageable pageable = PageRequest.of(page, size, Sort.by("firstName").ascending());
+    Page<Employee> employeePage = employeeService.getEmployeesWithPagination(keyword, pageable);
+
+    List<EmployeeResponseDto> content = employeePage.getContent().stream()
         .map(this::convertToDto)
         .collect(Collectors.toList());
+
+    Map<String, Object> response = new HashMap<>();
+    response.put("content", content);
+    response.put("totalPages", employeePage.getTotalPages());
+    response.put("totalElements", employeePage.getTotalElements());
+    response.put("currentPage", employeePage.getNumber());
+    response.put("size", employeePage.getSize());
+
+    return response;
   }
 
   /**

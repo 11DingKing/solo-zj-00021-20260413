@@ -2,9 +2,15 @@ import axios from 'axios';
 
 const API_URL = 'https://employee-management-app-gdm5.onrender.com/api/employees';
 
-// Get all employees
-export const getAllEmployees = async () => {
-  const response = await axios.get(API_URL);
+// Get all employees with pagination and search
+export const getAllEmployees = async (page = 0, size = 10, keyword = '') => {
+  const params = new URLSearchParams();
+  params.append('page', page);
+  params.append('size', size);
+  if (keyword && keyword.trim()) {
+    params.append('keyword', keyword.trim());
+  }
+  const response = await axios.get(`${API_URL}?${params.toString()}`);
   return response.data;
 };
 

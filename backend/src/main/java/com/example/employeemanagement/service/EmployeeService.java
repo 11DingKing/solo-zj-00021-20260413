@@ -2,10 +2,14 @@ package com.example.employeemanagement.service;
 
 import com.example.employeemanagement.model.Employee;
 import com.example.employeemanagement.repository.EmployeeRepository;
+import com.example.employeemanagement.specification.EmployeeSpecification;
 import java.util.List;
 import java.util.Optional;
 import javax.persistence.EntityManager;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +30,18 @@ public class EmployeeService {
    */
   public List<Employee> getAllEmployees() {
     return employeeRepository.findAllWithDepartments();
+  }
+
+  /**
+   * Get employees with pagination and search.
+   *
+   * @param keyword Search keyword for firstName, lastName, email
+   * @param pageable Pageable object for pagination
+   * @return Page of employees
+   */
+  public Page<Employee> getEmployeesWithPagination(String keyword, Pageable pageable) {
+    Specification<Employee> spec = EmployeeSpecification.searchByKeyword(keyword);
+    return employeeRepository.findAll(spec, pageable);
   }
 
   /**

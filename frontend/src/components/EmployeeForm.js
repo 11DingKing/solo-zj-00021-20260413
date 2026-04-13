@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { addEmployee, getEmployeeById, updateEmployee } from '../services/employeeService';
 import { getAllDepartments } from '../services/departmentService';
 import { TextField, Button, MenuItem, Box, CircularProgress } from '@mui/material';
@@ -23,7 +23,16 @@ const EmployeeForm = () => {
   const [departments, setDepartments] = useState([]);
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isLoading, setIsLoading] = useState(false);
+
+  const getEmployeesPath = () => {
+    const state = location.state;
+    if (state && state.from) {
+      return state.from;
+    }
+    return '/employees';
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -62,7 +71,7 @@ const EmployeeForm = () => {
     } else {
       setEmployee({
         ...employee,
-        [name]: name === 'age' ? Number(value) : value, // Convert age to number
+        [name]: name === 'age' ? Number(value) : value,
       });
     }
   };
@@ -77,7 +86,7 @@ const EmployeeForm = () => {
         await addEmployee(employee);
       }
       setIsLoading(false);
-      navigate('/employees');
+      navigate(getEmployeesPath(), { replace: true });
     } catch (error) {
       console.error('Error saving employee:', error);
       setIsLoading(false);

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getAllEmployees, deleteEmployee } from '../services/employeeService';
 import { getAllDepartments } from '../services/departmentService';
 import { exportToCsv } from '../utils/csvUtils';
@@ -36,10 +36,13 @@ import EmailIcon from '@mui/icons-material/Email';
 
 const EmployeeList = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [employees, setEmployees] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [searchTerm, setSearchTerm] = useState(searchParams.get('keyword') || '');
+  const [page, setPage] = useState(parseInt(searchParams.get('page')) || 0);
+  const [rowsPerPage, setRowsPerPage] = useState(parseInt(searchParams.get('size')) || 10);
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [deletingEmployeeId, setDeletingEmployeeId] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -49,6 +52,17 @@ const EmployeeList = () => {
   const [ageFilter, setAgeFilter] = useState('all');
   const [sortBy, setSortBy] = useState('name');
   const [denseRows, setDenseRows] = useState(false);
+  const searchTimeoutRef = useRef(null);
+  const isInitialMount = useRef(true);
+
+  const getCurrentPathWithParams = () => {
+    const params = new URLSearchParams();
+    if (page > 0) params.set('page', page);
+    if (rowsPerPage !== 10) params.set('size', rowsPerPage);
+    if (searchTerm && searchTerm.trim()) params.set('keyword', searchTerm.trim());
+    const queryString = params.toString();
+    return queryString ? `/employees?${queryString}` : '/employees';
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -59,29 +73,63 @@ const EmployeeList = () => {
     }
   }, [navigate]);
 
+  const fetchEmployees = useCallback(async () => {
+    if (!isLoggedIn) return;
+    setLoading(true);
+    try {
+      const data = await getAllEmployees(page, rowsPerPage, searchTerm);
+      setEmployees(data.content || []);
+      setTotalElements(data.totalElements || 0);
+      setTotalPages(data.totalPages || 0);
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+    }
+    setLoading(false);
+  }, [isLoggedIn, page, rowsPerPage, searchTerm]);
+
   useEffect(() => {
     if (isLoggedIn) {
-      const fetchData = async () => {
-        setLoading(true);
+      fetchEmployees();
+    }
+  }, [isLoggedIn, fetchEmployees]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      const fetchDepartments = async () => {
         try {
-          const data = await getAllEmployees();
-          setEmployees(data);
           const departmentData = await getAllDepartments();
           setDepartments(departmentData);
         } catch (error) {
-          console.error('Error fetching employees:', error);
+          console.error('Error fetching departments:', error);
         }
-        setLoading(false);
       };
-      fetchData();
+      fetchDepartments();
     }
   }, [isLoggedIn]);
+
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    const params = new URLSearchParams();
+    if (page > 0) params.set('page', page);
+    if (rowsPerPage !== 10) params.set('size', rowsPerPage);
+    if (searchTerm && searchTerm.trim()) params.set('keyword', searchTerm.trim());
+    setSearchParams(params, { replace: true });
+  }, [page, rowsPerPage, searchTerm, setSearchParams]);
 
   const handleDelete = async id => {
     setDeletingEmployeeId(id);
     try {
       await deleteEmployee(id);
-      setEmployees(prevEmployees => prevEmployees.filter(employee => employee.id !== id));
+      const newTotalElements = totalElements - 1;
+      const newTotalPages = Math.ceil(newTotalElements / rowsPerPage);
+      if (page >= newTotalPages && newTotalPages > 0) {
+        setPage(newTotalPages - 1);
+      } else {
+        fetchEmployees();
+      }
     } catch (error) {
       console.error('Error deleting employee:', error);
     }
@@ -89,9 +137,24 @@ const EmployeeList = () => {
   };
 
   const handleSearchChange = event => {
-    setSearchTerm(event.target.value);
-    setPage(0); // Reset page to 0 whenever search term changes
+    const value = event.target.value;
+    setSearchTerm(value);
+    setPage(0);
   };
+
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      setPage(0);
+    }, 300);
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchTerm]);
 
   const handleChangePage = (event, newPage) => {
     setPage(newPage);
@@ -99,13 +162,15 @@ const EmployeeList = () => {
 
   const handleChangeRowsPerPage = event => {
     setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0); // Reset page to 0 when rows per page changes
+    setPage(0);
   };
 
   const handleResetFilters = () => {
     setDepartmentFilter('all');
     setAgeFilter('all');
     setSortBy('name');
+    setSearchTerm('');
+    setPage(0);
   };
 
   const handleExportCsv = () => {
@@ -115,7 +180,7 @@ const EmployeeList = () => {
       { label: 'Department', accessor: emp => emp.department?.name || 'Unassigned' },
       { label: 'Age', accessor: emp => emp.age || '' },
     ];
-    exportToCsv(filteredEmployees, columns, 'employees');
+    exportToCsv(employees, columns, 'employees');
   };
 
   const handleCopyEmail = email => {
@@ -133,17 +198,13 @@ const EmployeeList = () => {
 
   const filteredEmployees = employees
     .filter(employee => {
-      const matchesSearch =
-        employee.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        employee.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        employee.email.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesDepartment = departmentFilter === 'all' || String(employee.department?.id) === departmentFilter;
       const matchesAge =
         ageFilter === 'all' ||
         (ageFilter === 'under30' && employee.age < 30) ||
         (ageFilter === '30to45' && employee.age >= 30 && employee.age <= 45) ||
         (ageFilter === '45plus' && employee.age > 45);
-      return matchesSearch && matchesDepartment && matchesAge;
+      return matchesDepartment && matchesAge;
     })
     .sort((a, b) => {
       if (sortBy === 'age') {
@@ -156,8 +217,7 @@ const EmployeeList = () => {
       const nameB = `${b.firstName} ${b.lastName}`;
       return nameA.localeCompare(nameB);
     });
-  const paginatedEmployees = filteredEmployees.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  const totalEmployees = employees.length;
+
   const averageAge = employees.length > 0 ? Math.round(employees.reduce((sum, emp) => sum + (emp.age || 0), 0) / employees.length) : 0;
   const visibleCount = filteredEmployees.length;
   const departmentsCount = departments.length;
@@ -168,7 +228,7 @@ const EmployeeList = () => {
     return `${firstInitial}${lastInitial}`.toUpperCase();
   };
 
-  if (loading) {
+  if (loading && employees.length === 0) {
     return (
       <Box
         sx={{
@@ -238,7 +298,7 @@ const EmployeeList = () => {
           >
             Export CSV
           </Button>
-          <Button variant="contained" component={Link} to="/add-employee">
+          <Button variant="contained" component={Link} to="/add-employee" state={{ from: getCurrentPathWithParams() }}>
             Add Employee
           </Button>
         </Stack>
@@ -258,7 +318,7 @@ const EmployeeList = () => {
               Total employees
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, letterSpacing: -0.5 }}>
-              {totalEmployees}
+              {totalElements}
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Across all departments
@@ -388,6 +448,9 @@ const EmployeeList = () => {
             <Typography variant="body2" color="text.secondary">
               Active filters:
             </Typography>
+            {searchTerm && searchTerm.trim() && (
+              <Chip label={`Search: "${searchTerm.trim()}"`} onDelete={() => setSearchTerm('')} color="primary" variant="outlined" />
+            )}
             {departmentFilter !== 'all' && (
               <Chip
                 label={`Department: ${departments.find(d => String(d.id) === departmentFilter)?.name || 'N/A'}`}
@@ -428,8 +491,8 @@ const EmployeeList = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {paginatedEmployees.length ? (
-              paginatedEmployees.map((employee, idx) => (
+            {filteredEmployees.length ? (
+              filteredEmployees.map((employee, idx) => (
                 <TableRow
                   key={employee.id}
                   hover
@@ -498,7 +561,13 @@ const EmployeeList = () => {
                   </TableCell>
                   <TableCell align="right">
                     <Stack direction="row" justifyContent="flex-end" spacing={1}>
-                      <Button variant="outlined" size="small" component={Link} to={`/edit-employee/${employee.id}`}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        component={Link}
+                        to={`/edit-employee/${employee.id}`}
+                        state={{ from: getCurrentPathWithParams() }}
+                      >
                         Edit
                       </Button>
                       <Tooltip title="This will permanently remove the employee">
@@ -535,9 +604,9 @@ const EmployeeList = () => {
         </Table>
       </TableContainer>
       <TablePagination
-        rowsPerPageOptions={[5, 10, 25]}
+        rowsPerPageOptions={[10, 25, 50]}
         component="div"
-        count={filteredEmployees.length}
+        count={totalElements}
         rowsPerPage={rowsPerPage}
         page={page}
         onPageChange={handleChangePage}
